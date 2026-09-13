@@ -1,0 +1,133 @@
+version: 2
+
+run_id: qlike3-run.001-continued-pretrain
+
+notes: Continued pretraining from qlike3-run.000-pretrain over the remaining 50% of the 41B-unit mix40b pass.
+
+configuration:
+  reference_run_id: qlike3-run.000-pretrain
+  reference_checkpoint: last
+  load_reference_optimizer_state: true
+
+  training_view_preset: mix40b-continued-pretrain
+
+  task_config:
+    wrapper_class: CausalLmTaskWrapper
+    params:
+      windowing_policy:
+        add_eos_at_end_of_doc: true
+        align_last_window_to_end: true
+        min_new_tokens: 256
+        overlap: 128
+        window_max_len: 1024
+      packing_policy:
+        enabled: true
+        max_docs_per_pack: 3
+        target_fill_ratio: 0.8
+        example_buffer_size: 200
+      tokenizer_id: enfr-bpe-sd-nfc-48
+      assistant_format: normalized
+
+  model_config:
+    name: simple-v6
+    builder_class: DecoderV2
+    params:
+      d_ff: 5504
+      d_model: 1024
+      embedding_dim: 1024
+      dropout: 0.0
+      max_seq_len: 1024
+      n_heads: 16
+      n_kv_heads: 8
+      n_layers: 24
+      vocab_size: 48000
+      tie_embeddings: true
+      mlp_activation: swiglu
+      norm: rms
+      qk_norm: true
+
+  baseline_config:
+    external_models:
+      gpt2: openai-community/gpt2
+      pythia_160m: EleutherAI/pythia-160m
+      smollm2_135m: HuggingFaceTB/SmolLM2-135M
+      smollm2_135m_instruct: HuggingFaceTB/SmolLM2-135M-Instruct
+      smollm2_360m: HuggingFaceTB/SmolLM2-360M
+      smollm2_360m_instruct: HuggingFaceTB/SmolLM2-360M-Instruct
+    run_ids:
+      qlike3_pretrain: qlike3-run.000-pretrain
+      bigger2: bigger2-cnt-run
+
+  lr_config:
+    start_lr: 5.0e-05
+    max_lr: 0.0002
+    end_lr: 5.0e-05
+    warmup_length_ratio: 0.006
+    cos_decay_start_ratio: 0.9
+
+  trainer_config:
+    checkpoint_every_batch: 200
+    max_training_units: 20500000000
+    batch_size: 12
+    grad_accum_size_units: 500000
+    seed: 827
+    use_bf16: true
+    model_save_pcts:
+    - 5
+    - 10
+    - 20
+    - 40
+    - 70
+    gradient_noise_update_batch_count: 0
+
+  evaluation_configs:
+  - name: mix40b-txt
+    is_primary: true
+    view_preset: mix40b-eval-pretrain
+  - name: def4
+    view_preset: default4-eval-pretrain
+  - name: code
+    view_preset: code-eval-pretrain
+  - name: french
+    view_preset: french-eval-pretrain
+
+  probe_configs:
+  - preset: sft
+    probe_modulus: 1
+    tensorboard_metrics:
+    - mean_score
+    - greedy_pass@1
+    - pass@4
+    - lpass@4
+    slack_observable: true      
+
+  benchmark_config:
+    every_n_checkpoints: 2
+    tasks:
+    - hellaswag
+    - arc_easy
+    - arc_challenge
+    - openbookqa
+    - piqa
+    - winogrande
+    - copa
+    - lambada_openai
+    - truthfulqa_mc2
+    - boolq
+    - mmlu
+    batch_size: 8
+    seed: 827
+
+  optimizer_config:
+    beta1: 0.9
+    beta2: 0.95
+    eps: 1.0e-08
+    grad_clip: 1
+    weight_decay: 0.03
+
+  slack_config:
+    channel: wintermute
+    push_interval_sec: 60
+    secret_file: ~/.secrets/secret1.gpg
+    bot_token_secret_id: textdata.train.slack.bot
+    app_token_secret_id: textdata.train.slack.app

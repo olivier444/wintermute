@@ -1,0 +1,7 @@
+from __future__ import annotations
+
+from .default import DEFAULT_TOKENIZER_SNAPSHOT_PRESETS
+
+TOKENIZER_SNAPSHOT_PRESETS = [
+    *DEFAULT_TOKENIZER_SNAPSHOT_PRESETS,
+]

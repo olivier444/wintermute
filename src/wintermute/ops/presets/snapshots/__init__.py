@@ -1,0 +1,11 @@
+from __future__ import annotations
+
+from .pretrain import PRETRAIN_SNAPSHOT_PRESETS
+from .sft import SFT_SNAPSHOT_PRESETS
+from .tokenizer import TOKENIZER_SNAPSHOT_PRESETS
+
+SNAPSHOT_PRESETS = [
+    *SFT_SNAPSHOT_PRESETS,
+    *PRETRAIN_SNAPSHOT_PRESETS,
+    *TOKENIZER_SNAPSHOT_PRESETS,
+]

@@ -1,0 +1,12 @@
+from __future__ import annotations
+
+from .default import DEFAULT_TRAIN_TOKENIZER_PRESETS
+from .smoke import SMOKE_TRAIN_TOKENIZER_PRESETS
+
+TRAIN_TOKENIZER_PRESETS = [
+    *DEFAULT_TRAIN_TOKENIZER_PRESETS,
+    *SMOKE_TRAIN_TOKENIZER_PRESETS,
+]
+
+
+__all__ = ["TRAIN_TOKENIZER_PRESETS"]

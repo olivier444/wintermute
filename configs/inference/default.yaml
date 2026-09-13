@@ -1,0 +1,37 @@
+version: 2
+
+notes: Slack inference endpoint example
+
+configuration:
+  device: cpu
+  system_prompt: ''
+  poll_interval_sec: 1
+
+  models:
+  - name: ql3
+    run_id: qlike3-run.000-pretrain
+  - name: ql3t
+    run_id: qlike3-run.001-translation
+  - name: ql3srt
+    run_id: qlike3-run.001-simple-routing
+  - name: ql3-prev-rt
+    run_id: qlike3-run.001-task-routing
+  - name: ql3rt
+    run_id: qlike3-run.001-task-routing
+  - name: b2
+    run_id: bigger2-run.003-sft
+  - name: s135
+    task_run_id: qlike3-run.000-pretrain
+    external_model_name: HuggingFaceTB/SmolLM2-135M-Instruct
+  - name: s360
+    task_run_id: qlike3-run.000-pretrain
+    external_model_name: HuggingFaceTB/SmolLM2-360M-Instruct
+  - name: q
+    task_run_id: qlike3-run.000-pretrain
+    external_model_name: Qwen/Qwen2.5-0.5B-Instruct
+
+  slack_config:
+    channel: wintermute_chat
+    secret_file: ~/.secrets/secret1.gpg
+    bot_token_secret_id: textdata.ip.slack.bot
+    app_token_secret_id: textdata.ip.slack.app
