@@ -6,7 +6,7 @@ Wintermute is a simple end-to-end research codebase for building and training sm
 
 ## First Results At A Glance
 
-The reference 530M base model was trained from scratch on a single NVIDIA RTX 5070 Ti with 16 GB of VRAM. The published base-pretraining checkpoint below had seen `24B` tokens; continued-pretraining stages are tracked separately.
+The reference 530M base model was trained from scratch on a single NVIDIA RTX 5070 Ti with 16 GB of VRAM. The published base-pretraining checkpoint below has seen `24B` tokens (continued-pretraining stages are tracked separately)
 
 All models in this comparison were evaluated zero-shot with the same `lm-eval` harness, task suite, and metric definitions. `Mean` is the unweighted mean of nine accuracy columns: ARC-C, ARC-E, COPA, HellaSwag, OpenBookQA, PIQA, WinoGrande, TruthfulQA MC2, and LAMBADA accuracy.
 
@@ -65,13 +65,13 @@ Hugging Face datasets
 
 ## Tokenization And Chat Formatting
 
-Local tokenizers use byte-level BPE with configurable NFC or NFKC normalization. Runtime and training input share a normalization boundary that standardizes newlines and selected invisible, spacing, and bidirectional-control characters. Operator boundaries are isolated and digit runs are split into individual digits before BPE merges.
+Local tokenizers use byte-level BPE with configurable NFC or NFKC normalization with specific behavior for operators and digit characters before BPE merges.
 
-Locally trained tokenizers reserve EOS/PAD/UNK plus the Wintermute conversation controls, including `[:system:]`, `[:user:]`, `[:assistant:]`, `[:scratchpad:]`, `[:task:]`, `[:format:]`, `[:final:]`, and `[:eot:]`.
+Locally trained tokenizers reserve EOS/PAD/UNK plus the Wintermute conversation controls (`[:system:]`, `[:user:]`, `[:assistant:]`, `[:scratchpad:]`, `[:task:]`, `[:format:]`, `[:final:]`, `[:eot:]`)
 
 Chat protocols are separate from tokenizer wrappers:
 
-- `WintermuteChatFormat` renders the compact local control-token grammar.
+- `WintermuteChatFormat` for local rendering.
 - `HuggingFaceChatFormat` delegates rendering to an external tokenizer's official chat template.
 
 
@@ -81,7 +81,7 @@ The active model implementation is `DecoderV2`, built directly in PyTorch. It su
 
 Training setup:
 
-- token-based gradient accumulation + gradient checkpointing;
+- token-based gradient accumulation + activation checkpointing;
 - AdamW / weight-decay;
 - configurable learning-rate schedules;
 - bfloat16;
@@ -95,7 +95,7 @@ Prompt/completion views can supervise only the assistant continuation or include
 
 ## CLI
 
-The main commands are:
+Main commands:
 
 - Raw/index pipeline: `get_raw`
 - Materialization and analysis: `create-snapshot`, `analyze`
@@ -122,8 +122,6 @@ python -m wintermute start-inference-endpoint \
 
 ## Artifacts
 
-For an output root such as `/data/slm`, Wintermute writes:
-
 ```text
 raw/                  source-like JSONL shards and ingestion metadata (mostly from HuggingFace)
 index/                parquet source, record, band, duplicate, and snapshot tables
@@ -132,13 +130,9 @@ tokenizer/            trained tokenizer JSON files
 run_store/            manifests, logs, models, checkpoints, and fork provenance
 ```
 
-Run manifests use the canonical `configuration` wrapper and are persisted at `run_store/<run_id>/description.yaml`.
-
 ## Monitoring And Inference
 
 Training can attach a Slack thread to a run for status updates, metrics history, pause/resume/stop controls, runtime parameter changes, and named checkpoints.
-
-`generate` opens an interactive local generation loop. `start-inference-endpoint` runs a Slack Socket Mode endpoint with one conversation per thread, model switching, regeneration, system-prompt controls, sampling controls, and optional external Hugging Face models.
 
 
 ## License
