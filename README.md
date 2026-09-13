@@ -4,7 +4,7 @@
 
 Wintermute is a simple end-to-end research codebase for building and training small language models under constrained hardware budget. The goal is to own the full stack - data ingestion and deduplication, tokenizer training, Transformer implementation, pretraining/SFT, evaluation, checkpointing, and inference - and explore how far compact models can be pushed on a single consumer GPU.
 
-## First Results At A Glance
+## First Results
 
 The reference 530M base model was trained from scratch on a single NVIDIA RTX 5070 Ti with 16 GB of VRAM. The published base-pretraining checkpoint below has seen `24B` tokens (continued-pretraining stages are tracked separately)
 
