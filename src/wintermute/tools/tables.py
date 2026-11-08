@@ -74,7 +74,7 @@ def execute_sql(sql: str, *, temp_directory_root: Optional[str] = None):
 
 def execute_sql_as_numpy(sql: str, *, temp_directory_root: Optional[str] = None):
     con = create_duckdb_connection(temp_directory_root=temp_directory_root)
-    tbl = con.sql(sql).fetch_arrow_table() 
+    tbl = con.sql(sql).to_arrow_table()
 
     result = (
         tbl.num_rows, 

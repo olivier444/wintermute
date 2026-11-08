@@ -13,14 +13,20 @@ InferenceCommandKind = Literal[
     "top_k",
     "top_p",
     "greedy",
+    "format",
+    "force_final",
 ]
 
 INFERENCE_COMMAND_HELP_TEXT = """[info] inference commands
 *Conversation*
-• `!settings` — display the current settings
 • `!reset` — clear this thread's history
+
+*Global inference settings*
+• `!settings` — display the current settings
 • `!max_tokens 128`, `!temperature 0.7`, `!top_k 50` or `!top_k off`
 • `!top_p 0.9`, `!greedy on` or `!greedy off`
+• `!format on`, `!format off`
+• `!force_final on`, `!force_final off`
 
 *Models and system prompt*
 • `!models`, `!model <name>`, `!again`
@@ -28,8 +34,6 @@ INFERENCE_COMMAND_HELP_TEXT = """[info] inference commands
 
 *Endpoint*
 • `!device cpu`, `!device gpu`
-• `!format on`, `!format off`
-• `!force_final on`, `!force_final off`
 • `!help`"""
 
 
@@ -78,6 +82,10 @@ def parse_inference_command(text: str) -> InferenceCommandParseResult:
         return _parse_top_k(argument)
     if command == "greedy":
         return _parse_bool(command, argument)
+    if command == "format":
+        return _parse_bool("format", argument)
+    if command == "force_final":
+        return _parse_bool("force_final", argument)
     return InferenceCommandParseResult(error=f"unknown command '{command}'")
 
 

@@ -111,6 +111,16 @@ def extract_logits_from_model_output(output: object) -> torch.Tensor:
         return logits
 
     raise TypeError(f"Unsupported model output type: {type(output)!r}")
+
+
+def extract_past_key_values_from_model_output(output: object) -> object | None:
+    if isinstance(output, dict):
+        return output.get("past_key_values")
+
+    if isinstance(output, tuple):
+        return output[1] if len(output) > 1 else None
+
+    return getattr(output, "past_key_values", None)
         
 
 def iter_batches(source: Iterable[Any], batch_size: int) -> Iterable[List[Any]]:

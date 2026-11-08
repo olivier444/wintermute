@@ -2,15 +2,23 @@
 
 from pathlib import Path
 
-from wintermute.ml.inference.workspace import InferenceWorkspace
+from wintermute.ml.inference.components_loader import InferenceComponentsLoader
+from wintermute.ml.inference.service import InferenceConversationService
 
 
 def generate(output_root: str, run_id: str) -> None:
-    with InferenceWorkspace.open(Path(output_root), run_id) as workspace:
-        generator = workspace.create_generator(system_prompt="")
+    loader = InferenceComponentsLoader.open(Path(output_root), run_id)
+    task_wrapper, model = loader.load()
 
+    with InferenceConversationService(
+        task_wrapper=task_wrapper,
+        model=model,
+    ) as service:
         while True:
             arguments = input("[> ")
-            reply = generator.generate(arguments).as_text()
-            print(f"{reply}")
+            result = service.handle_message(
+                conversation_id="interactive",
+                text=arguments,
+            )
+            print(result.reply_text)
             print("")

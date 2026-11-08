@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .trainer import Trainer
+
 if TYPE_CHECKING:
     from .workspace import TrainingWorkspace
 
-__all__ = ["TrainingWorkspace"]
+__all__ = ["Trainer", "TrainingWorkspace"]
 
 
 def __getattr__(name: str) -> object:

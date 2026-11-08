@@ -94,6 +94,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
         output_root=args.output_root,
         training_config_path=args.training_config,
         top_sources=args.top_sources,
+        mode=args.mode,
     )
 
 
@@ -280,6 +281,12 @@ def build_parser() -> argparse.ArgumentParser:
             "path to a training config YAML like the example run descriptions; "
             "if the top-level mapping contains 'configuration', that nested payload is used"
         ),
+    )
+    p_analyze.add_argument(
+        "--mode",
+        choices=("fast", "full"),
+        default="fast",
+        help="fast-fail on an estimated insufficient composite capacity, or scan fully (default: fast)",
     )
     p_analyze.add_argument(
         "--top-sources",

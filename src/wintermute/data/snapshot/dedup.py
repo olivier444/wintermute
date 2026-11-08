@@ -180,7 +180,7 @@ def build_dedup_rejections(
     WHERE similarity >= {SIMILARITY_THRESHOLD}
     """
 
-    reader = con.execute(sql).fetch_record_batch(rows_per_batch=200_000)
+    reader = con.sql(sql).to_arrow_reader(batch_size=200_000)
     edges = (
         (str(uid1), str(uid2), bool(has_reference))
         for batch in reader

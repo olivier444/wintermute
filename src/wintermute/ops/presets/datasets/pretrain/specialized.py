@@ -58,7 +58,8 @@ SPECIALIZED_PRETRAIN_DATASET_PRESETS = [
     # Summary: High-quality web documents transformed into original-text + multiple synthetic Q&A pairs.
     # Natural format: NTP over the synthesized `content` field.
     # Orientation: capability-oriented late-stage pretraining, contextual retrieval and comprehension.
-    # Recommended SFT task spec: not applicable; intended here as pretraining/CPT data.
+    # Recommended SFT task spec: TASK_INFORMATION_EXTRACTION when a runtime view splits the QA pairs;
+    # not applicable when consumed directly as pretraining/CPT text.
     # Volume: about 245B MiniCPM5 tokens across roughly 320 HF shards. Sampling
     # 70 physical shards and retaining 17% of records may yield about 9.0B tokens.
     DatasetPreset(

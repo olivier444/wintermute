@@ -8,30 +8,25 @@ import torch.nn as nn
 from transformers import AutoModelForCausalLM
 
 from wintermute.data.constants import DIR_EXTERNAL_MODELS, DIR_HUGGING_FACE_MODELS
-from wintermute.ml.inference.generator import Generator
 from wintermute.ml.runs import Run, RunStore
 from wintermute.ml.tasks.factory import TaskWrapper, TaskWrapperFactory
 from wintermute.ml.training.task_specification import TaskSpecification
 
 
-class InferenceWorkspace:
+class InferenceComponentsLoader:
     def __init__(
         self,
         run: Run,
     ) -> None:
         self.run = run
-        self.run_id = run.run_id
         self.root_path = run.root
-        self.run_dir = run.path
-        self.manifest = run.manifest
-        self.checkpoints = run.checkpoints
         self._wrapper_factory = TaskWrapperFactory()
 
     @property
     def config(self):
         return self.run.config
 
-    def create_components(
+    def load(
         self,
         *,
         device_override: str | torch.device | None = None,
@@ -56,19 +51,6 @@ class InferenceWorkspace:
         model.to(wrapper.device)
         return wrapper, model
 
-    def create_generator(
-        self,
-        *,
-        system_prompt: str | None = None,
-        device_override: str | torch.device | None = None,
-    ) -> Generator:
-        task_wrapper, model = self.create_components(device_override=device_override)
-        return Generator(
-            task_wrapper=task_wrapper,
-            model=model,
-            system_prompt=system_prompt,
-        )
-
     @classmethod
     def open(
         cls,
@@ -76,19 +58,9 @@ class InferenceWorkspace:
         run_id: str,
         *,
         load_slack_config: bool = False,
-    ) -> "InferenceWorkspace":
+    ) -> "InferenceComponentsLoader":
         runs = RunStore(root)
         return cls(runs.open(run_id, load_slack_config=load_slack_config))
-
-    def close(self) -> None:
-        return
-
-    def __enter__(self) -> "InferenceWorkspace":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> bool:
-        self.close()
-        return False
 
     def _resolve_inference_device(
         self,
@@ -135,7 +107,7 @@ class InferenceWorkspace:
 
         cache_dir = self.root_path / DIR_EXTERNAL_MODELS / DIR_HUGGING_FACE_MODELS
         print(
-            f"[inference workspace] loading external model={external_model_name} "
+            f"[inference loader] loading external model={external_model_name} "
             f"tokenizer={tokenizer_name}"
         )
         hf_model = AutoModelForCausalLM.from_pretrained(

@@ -209,10 +209,14 @@ def equation_answer_arithmetic_augmentation(
 def split_qa_pairs(
     *,
     input_field: str = "content",
+    task: str | Mapping[str, Any] | None = None,
 ) -> RecordTransformConfig:
+    params: dict[str, Any] = {"input_field": input_field}
+    if task is not None:
+        params["task"] = dict(task) if isinstance(task, Mapping) else task
     return RecordTransformConfig(
         kind="split_qa_pairs",
-        params={"input_field": input_field},
+        params=params,
     )
 
 

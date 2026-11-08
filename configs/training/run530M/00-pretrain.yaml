@@ -62,6 +62,7 @@ configuration:
     cos_decay_start_ratio: 0.9
 
   trainer_config:
+    kind: supervised
     checkpoint_every_batch: 200
     max_training_units: 41000000000
     batch_size: 12

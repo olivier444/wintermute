@@ -7,7 +7,11 @@ import torch
 import torch.nn as nn
 
 from wintermute.ml.runs import Run, RunStore, SourceCapture, capture_run_source
-from wintermute.ml.training.config import EvaluationConfig
+from wintermute.ml.training.config import (
+    DpoTrainerConfig,
+    EvaluationConfig,
+    SupervisedTrainerConfig,
+)
 from wintermute.ml.training.controller import (
     CompositeTrainerController,
     FileTrainerController,
@@ -17,6 +21,8 @@ from wintermute.ml.training.controller import (
 )
 from wintermute.ml.training.eval_suite import RuntimeEvalSuite
 from wintermute.ml.training.logger import CompositeLogger, Logger, SlackRunLogger, TensorBoardRunLogger
+from wintermute.ml.training.dpo import DpoTrainer
+from wintermute.ml.training.supervised import SupervisedTrainer
 from wintermute.ml.training.trainer import Trainer
 from wintermute.ml.tasks.factory import TaskWrapper, TaskWrapperFactory
 from wintermute.ml.training.task_specification import TaskSpecification
@@ -61,6 +67,14 @@ class TrainingWorkspace:
         return self.run.spec
 
     def create_trainer(self, *, resume_checkpoint: str = "last") -> Trainer:
+        trainer_config = self.config.trainer_config
+        if not isinstance(
+            trainer_config,
+            (SupervisedTrainerConfig, DpoTrainerConfig),
+        ):
+            raise ValueError(
+                f"unsupported trainer configuration: {type(trainer_config).__name__}"
+            )
         if self.logger is None or self.run_controller is None:
             self.logger, self.run_controller = self._build_runtime_adapters()
         assert self.logger is not None
@@ -77,14 +91,17 @@ class TrainingWorkspace:
                 model_source.try_load_into(model)
             else:
                 checkpoint = model_source.load_checkpoint_into(model, reference_checkpoint)
-                if self.config.load_reference_optimizer_state:
+                if (
+                    isinstance(trainer_config, SupervisedTrainerConfig)
+                    and trainer_config.load_reference_optimizer_state
+                ):
                     reference_optimizer_state = checkpoint.states.get("optimizer")
                     if reference_optimizer_state is None:
                         raise ValueError(
                             f"checkpoint '{checkpoint.checkpoint_id}' for reference run "
                             f"'{model_source.run_id}' has no optimizer state"
                         )
-        bf16_enabled = bool(self.config.trainer_config.use_bf16 and self.device.type == "cuda")
+        bf16_enabled = bool(trainer_config.use_bf16 and self.device.type == "cuda")
 
         wrapper = self._wrapper_factory.build_wrapper(
             self.config.task_config,
@@ -92,11 +109,20 @@ class TrainingWorkspace:
             bf16_enabled,
             self.root_path,
         )
+
+        if isinstance(trainer_config, DpoTrainerConfig):
+            return DpoTrainer(
+                model=model,
+                task_wrapper=wrapper,
+                config=self.config,
+                device=self.device,
+            )
+
         eval_suites = [
-            self._build_eval_suite(spec, bf16_enabled, self.config.trainer_config.batch_size)
+            self._build_eval_suite(spec, bf16_enabled, trainer_config.batch_size)
             for spec in self.config.evaluation_configs
         ]
-        return Trainer(
+        return SupervisedTrainer(
             output_root=self.root_path.as_posix(),
             run_id=self.run_id,
             run_controller=self.run_controller,

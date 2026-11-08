@@ -31,6 +31,19 @@ def _snapshot_view_config(
     )
 
 
+def _generic_view_component(
+    training_view_config: TrainingViewConfig,
+    weight: float,
+    *,
+    max_restarts: int = 0
+) -> CompositeTrainingSource:
+    return CompositeTrainingSource(
+        weight=weight,
+        max_restarts=max_restarts,
+        view_config=training_view_config
+        )
+
+
 def _view_component(
     snapshot_id: str,
     weight: float,

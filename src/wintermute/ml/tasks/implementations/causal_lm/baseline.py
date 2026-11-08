@@ -125,12 +125,15 @@ class CausalLmBaselineSuite(BaselineSuite):
 
     def compute_eval_metrics(
         self,
-        view_config: TrainingViewConfig
+        view_config: TrainingViewConfig,
+        *,
+        max_eval_units: int | None = None,
     ) -> Dict[str, Dict[str, float]]:
         return {
             evaluator.name: evaluator.compute_eval_metrics(
                 view_config,
                 str(self.output_root),
+                max_eval_units=max_eval_units,
             )
             for evaluator in self.evaluators
         }

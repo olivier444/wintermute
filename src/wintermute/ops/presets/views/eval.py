@@ -121,4 +121,12 @@ PRESETS = [
             record_transform=text_processing.orange_sum_abstract_transform(),
         ),
     ),
+    _view_preset(
+        "ufw-l3-qa-eval",
+        _snapshot_view_config(
+            "ufw-l3-qa",
+            split="eval",
+            record_transform=text_processing.ultra_fineweb_l3_qa_transform(),
+        ),
+    ),
 ]

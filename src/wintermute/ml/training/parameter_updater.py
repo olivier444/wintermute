@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from torch.optim import Optimizer
 
-from wintermute.ml.training.config import TrainingConfig
+from wintermute.ml.training.config import RunConfig, SupervisedTrainerConfig
 from wintermute.ml.training.eval_runner import EvaluationRunner
 from wintermute.ml.training.lr_schedule import LrSchedule
 from wintermute.ml.training.optimizer_diagnostics import OptimizerDiagnosticsTracker
@@ -78,7 +78,7 @@ class TrainingParameterUpdater:
     def __init__(
         self,
         *,
-        config: TrainingConfig,
+        config: RunConfig,
         optimizer: Optimizer,
         lr_schedule: LrSchedule,
         optimizer_diagnostics: OptimizerDiagnosticsTracker,
@@ -146,7 +146,7 @@ class TrainingParameterUpdater:
 
     def _apply_runtime_config(self, patch: _TrainingParameterPatch) -> None:
         optimizer_config = self.config.optimizer_config
-        trainer_config = self.config.trainer_config
+        trainer_config = cast(SupervisedTrainerConfig, self.config.trainer_config)
 
         if patch.grad_clip is not None:
             optimizer_config.grad_clip = patch.grad_clip
@@ -166,7 +166,7 @@ class TrainingParameterUpdater:
         patch: _TrainingParameterPatch,
     ) -> list[str]:
         messages: list[str] = []
-        trainer_config = self.config.trainer_config
+        trainer_config = cast(SupervisedTrainerConfig, self.config.trainer_config)
 
         if patch.gradient_noise_update_batch_count is not None:
             previous_count = trainer_config.gradient_noise_update_batch_count

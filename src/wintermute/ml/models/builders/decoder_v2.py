@@ -12,6 +12,7 @@ from wintermute.ml.models.builders.decoder_block import DecoderBlock, build_norm
 from wintermute.ml.models.builders.rope import build_rope_cache
 from wintermute.ml.models.builders.factorized_embedding import FactorizedEmbeddingHead
 from wintermute.ml.models.base import BaseModel
+from wintermute.ml.models.model_output import CausalLmOutput, PastKeyValues
 from wintermute.tools.params import get_bool, get_float, get_optional_int, get_str
 
 
@@ -143,34 +144,123 @@ class DecoderV2(BaseModel):
             if fc2 is not None:
                 nn.init.normal_(fc2.weight, mean=0.0, std=residual_std)
 
-    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        past_key_values: PastKeyValues | None = None,
+        use_cache: bool = False,
+    ) -> CausalLmOutput:
         if input_ids.dim() != 2:
             raise ValueError("input_ids must be [B, T]")
 
-        _, seqlen = input_ids.shape
+        batch_size, seqlen = input_ids.shape
+        past_length = self._past_length(past_key_values, batch_size=batch_size)
 
-        if seqlen > self.max_seq_len:
-            raise ValueError(f"seqlen {seqlen} > max_seq_len {self.max_seq_len}")
+        if past_key_values is not None and not use_cache:
+            raise ValueError("past_key_values requires use_cache=True")
+
+        if past_key_values is not None and seqlen != 1:
+            raise ValueError("cached decoding requires exactly one input token")
+
+        total_seqlen = past_length + seqlen
+        if total_seqlen > self.max_seq_len:
+            raise ValueError(
+                f"cached seqlen {total_seqlen} > max_seq_len {self.max_seq_len}"
+            )
 
         x = self.embed_head.embed(input_ids)
         x = self.drop(x)
 
-        cos = cast(torch.Tensor, self.rope_cos)[:, :, :seqlen, :]
-        sin = cast(torch.Tensor, self.rope_sin)[:, :, :seqlen, :]
+        cos = cast(torch.Tensor, self.rope_cos)[
+            :, :, past_length:total_seqlen, :
+        ]
+        sin = cast(torch.Tensor, self.rope_sin)[
+            :, :, past_length:total_seqlen, :
+        ]
 
-        for block in self.blocks:
-            if self.training and self.use_checkpoint:
-                x = checkpoint(
-                    block,
+        next_past_key_values = []
+        for layer_index, block_module in enumerate(self.blocks):
+            block = cast(DecoderBlock, block_module)
+            if not use_cache:
+                # no KV cache
+                if self.training and self.use_checkpoint:
+                    x = checkpoint(
+                        block,
+                        x,
+                        cos,
+                        sin,
+                        use_reentrant=False,
+                    )
+                else:
+                    x = block(x, cos, sin)
+            else:
+                # use / prefill a kv cache
+                layer_past = (
+                    past_key_values[layer_index]
+                    if past_key_values is not None
+                    else None
+                )
+                x, present_key_value = block.forward_with_cache(
                     x,
                     cos,
                     sin,
-                    use_reentrant=False,
+                    layer_past,
+                    self.max_seq_len,
                 )
-            else:
-                x = block(x, cos, sin)
+                next_past_key_values.append(present_key_value)
 
         x = self.ln_f(x)
         logits = self.embed_head.project(x)
 
-        return logits
+        return CausalLmOutput(
+            logits=logits,
+            past_key_values=(
+                tuple(next_past_key_values)
+                if use_cache
+                else None
+            ),
+        )
+
+    def _past_length(
+        self,
+        past_key_values: PastKeyValues | None,
+        *,
+        batch_size: int,
+    ) -> int:
+        if past_key_values is None:
+            return 0
+        if len(past_key_values) != len(self.blocks):
+            raise ValueError(
+                "past_key_values must contain one key/value pair per decoder layer"
+            )
+
+        past_length: int | None = None
+        for block_module, layer_cache in zip(self.blocks, past_key_values):
+            block = cast(DecoderBlock, block_module)
+            key = layer_cache.key
+            value = layer_cache.value
+            if key.dim() != 4 or value.shape != key.shape:
+                raise ValueError(
+                    "each cached key/value pair must have shape "
+                    "[batch, n_kv_heads, max_seq_len, head_dim]"
+                )
+            if (
+                key.shape[0] != batch_size
+                or key.shape[1] != block.n_kv_heads
+                or key.shape[2] != self.max_seq_len
+                or key.shape[3] != block.head_dim
+            ):
+                raise ValueError(
+                    "each cached key/value pair must have shape "
+                    "[batch, n_kv_heads, max_seq_len, head_dim]"
+                )
+
+            layer_length = layer_cache.length
+            if layer_length < 0 or layer_length > self.max_seq_len:
+                raise ValueError("cached sequence length is outside model limits")
+            if past_length is None:
+                past_length = layer_length
+            elif layer_length != past_length:
+                raise ValueError("all decoder layer caches must have the same length")
+
+        return past_length if past_length is not None else 0

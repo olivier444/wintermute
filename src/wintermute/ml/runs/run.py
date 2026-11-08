@@ -12,7 +12,7 @@ from wintermute.ml.models.base import BaseModel
 from wintermute.ml.models.specifications import ModelSpecification
 from wintermute.ml.runs.checkpoints import CheckPoint, RunCheckpoints
 from wintermute.ml.runs.manifest import RunManifest
-from wintermute.ml.training.config import TrainingConfig
+from wintermute.ml.training.config import RunConfig
 from wintermute.tools.files import json_save
 from wintermute.tools.logging import console_log
 from wintermute.tools.misc import utc_now_unix_ms
@@ -35,7 +35,7 @@ class Run:
     checkpoints: RunCheckpoints
 
     @property
-    def config(self) -> TrainingConfig:
+    def config(self) -> RunConfig:
         return self.manifest.config
 
     @property

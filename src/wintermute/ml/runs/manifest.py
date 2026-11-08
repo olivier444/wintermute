@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict
 
-from wintermute.ml.training.config import TrainingConfig
+from wintermute.ml.training.config import RunConfig
 from wintermute.tools.files import json_load, json_save, yaml_load, yaml_save
 from wintermute.tools.logging import console_log
 
@@ -20,7 +20,7 @@ RUN_MANIFEST_VERSION = 6
 class RunManifest:
     run_id: str
     notes: str
-    config: TrainingConfig
+    config: RunConfig
 
     @classmethod
     def from_dict(
@@ -35,7 +35,7 @@ class RunManifest:
         return cls(
             run_id=str(payload["run_id"]),
             notes=str(payload.get("notes", "")),
-            config=TrainingConfig.from_dict(
+            config=RunConfig.from_dict(
                 config_payload,
                 load_slack_config=load_slack_config,
             ),

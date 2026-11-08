@@ -1,10 +1,11 @@
+"""Runtime projection of materialized records into causal-LM training examples."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from random import Random
 from typing import Iterator, List, Optional, cast
-
 from wintermute.data.iterate.completion_format import CompletionFormatRule
 from wintermute.data.iterate.dataclasses import (
     CompositeTrainingViewConfig,
@@ -58,7 +59,10 @@ from wintermute.ml.tokenization.chat_format import (
     ConversationContext,
     ConversationTurn,
 )
+from wintermute.ml.training.view import CompositeSourceExhaustionObserver
 from wintermute.tools.logging import console_log
+
+
 from wintermute.tools.misc import batch_iter
 
 
@@ -109,6 +113,43 @@ class TrainingViewIterationStats:
             f"reject_required_turn_too_long={self.sft_reject_required_turn_too_long}, "
             f"reject_invalid_example={self.sft_reject_invalid_example}"
         )
+
+    def metrics(self) -> dict[str, float]:
+        total_candidates = max(1, self.sft_candidates)
+        scratchpad_examples = max(1, self.sft_examples_with_scratchpad)
+        system_prompt_examples = max(1, self.sft_examples_with_system_prompt)
+        history_examples = max(1, self.sft_examples_with_history)
+        return {
+            "data/sft/emitted_pct": 100.0 * self.sft_emitted / total_candidates,
+            "data/sft/rejected_pct": 100.0 * self.sft_rejected / total_candidates,
+            "data/sft/scratchpad_removed_pct": (
+                100.0 * self.sft_scratchpad_removed / total_candidates
+            ),
+            "data/sft/history_reduced_pct": (
+                100.0 * self.sft_history_reduced / total_candidates
+            ),
+            "data/sft/history_turns_dropped_total": float(
+                self.sft_history_turns_dropped_total
+            ),
+            "data/sft/history_turns_dropped_avg": (
+                self.sft_history_turns_dropped_total / history_examples
+            ),
+            "data/sft/system_prompt_dropped_pct": (
+                100.0 * self.sft_system_prompt_dropped / total_candidates
+            ),
+            "data/sft/scratchpad_removed_pct_of_scratchpad_examples": (
+                100.0 * self.sft_scratchpad_removed / scratchpad_examples
+            ),
+            "data/sft/system_prompt_dropped_pct_of_system_prompt_examples": (
+                100.0 * self.sft_system_prompt_dropped / system_prompt_examples
+            ),
+            "data/sft/reject_required_turn_too_long_pct": (
+                100.0 * self.sft_reject_required_turn_too_long / total_candidates
+            ),
+            "data/sft/reject_invalid_example_pct": (
+                100.0 * self.sft_reject_invalid_example / total_candidates
+            ),
+        }
 
 
 class AbstractTrainingView(ABC):
@@ -421,6 +462,7 @@ class TrainingView(AbstractTrainingView):
 
 @dataclass
 class _CompositeTrainingSourceState:
+    source_index: int
     source: CompositeTrainingSource
     view: AbstractTrainingView
     iterator: Iterator[TrainingExample]
@@ -450,6 +492,7 @@ class CompositeTrainingView(AbstractTrainingView):
         verbosity_labels: tuple[tuple[str, int | None], ...] | None = None,
         format_labels: tuple[CompletionFormatRule, ...] | None = None,
         transform_seed: int | None = None,
+        source_exhaustion_observer: CompositeSourceExhaustionObserver | None = None,
         silent: bool = False,
     ) -> None:
         self.tokenizer = tokenizer
@@ -457,11 +500,14 @@ class CompositeTrainingView(AbstractTrainingView):
         self.silent = silent
         self.config = config
         self.name = config.display_name
+        self.source_exhaustion_observer = source_exhaustion_observer
+        self._stop_requested = False
         self.last_iteration_stats = TrainingViewIterationStats()
         self.completed_iteration_count = 0
         child_seed_rng = Random(config.seed if transform_seed is None else transform_seed)
         self.children = [
             _CompositeTrainingSourceState(
+                source_index=source_index,
                 source=source,
                 view=build_base_training_view(
                     tokenizer=tokenizer,
@@ -479,11 +525,12 @@ class CompositeTrainingView(AbstractTrainingView):
                 iterator=iter(()),
                 next_example=None,
             )
-            for source in config.sources
+            for source_index, source in enumerate(config.sources)
         ]
 
     def __iter__(self) -> Iterator[TrainingExample]:
         rng = Random(self.config.seed)
+        self._stop_requested = False
         runtime_states = [self._build_runtime_state(state) for state in self.children]
 
         live_stats = TrainingViewIterationStats()
@@ -497,11 +544,17 @@ class CompositeTrainingView(AbstractTrainingView):
 
                 state.served_examples += 1
                 state.served_units += example.effective_units()
-                state.next_example = self._advance_state(state)
+                state.next_example = self._advance_state(state, runtime_states)
                 self._refresh_live_iteration_stats(runtime_states)
                 yield self._annotate_example(example, state.name)
 
                 if state.next_example is None:
+                    if self._stop_requested:
+                        console_log(
+                            "training-view",
+                            f"[{self.name}] stopping composite iterator after fast capacity decision",
+                        )
+                        break
                     console_log(
                         "training-view",
                         f"[{self.name}] source '{state.name}' exhausted after {state.served_examples:_} examples"
@@ -550,18 +603,34 @@ class CompositeTrainingView(AbstractTrainingView):
             raise RuntimeError(f"Training view '{state.name}' is empty.") from exc
 
         return _CompositeTrainingSourceState(
+            source_index=state.source_index,
             source=state.source,
             view=state.view,
             iterator=iterator,
             next_example=next_example,
         )
 
-    def _advance_state(self, state: _CompositeTrainingSourceState) -> TrainingExample | None:
+    def _advance_state(
+        self,
+        state: _CompositeTrainingSourceState,
+        states: List[_CompositeTrainingSourceState],
+    ) -> TrainingExample | None:
         try:
             return next(state.iterator)
         except StopIteration:
             self._merge_child_iteration_stats(state)
-            if state.restart_count >= state.source.max_restarts:
+            terminal = state.restart_count >= state.source.max_restarts
+            if self.source_exhaustion_observer is not None:
+                self._stop_requested = self.source_exhaustion_observer(
+                    state.source_index,
+                    state.restart_count + 1,
+                    state.served_units,
+                    sum(item.served_units for item in states),
+                )
+                if self._stop_requested:
+                    return None
+
+            if terminal:
                 return None
 
             state.restart_count += 1
@@ -663,6 +732,7 @@ def build_base_training_view(
     verbosity_labels: tuple[tuple[str, int | None], ...] | None = None,
     format_labels: tuple[CompletionFormatRule, ...] | None = None,
     transform_seed: int | None = None,
+    source_exhaustion_observer: CompositeSourceExhaustionObserver | None = None,
     silent: bool = False,
 ) -> AbstractTrainingView:
     if isinstance(training_view_config, SnapshotTrainingViewConfig):
@@ -696,6 +766,7 @@ def build_base_training_view(
             verbosity_labels=verbosity_labels,
             format_labels=format_labels,
             transform_seed=transform_seed,
+            source_exhaustion_observer=source_exhaustion_observer,
             silent=silent,
         )
 

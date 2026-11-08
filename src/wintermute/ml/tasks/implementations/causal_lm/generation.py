@@ -1,20 +1,107 @@
 from __future__ import annotations
 
-from typing import cast
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
 
 import torch
 import torch.nn as nn
 
+from wintermute.data.iterate.feedback import GeneratedCompletion
+from wintermute.ml.inference.conversation import InferenceSettings
 from wintermute.ml.tokenization.chat_format import (
     AssistantCompletion,
     AssistantPromptFormat,
     ChatFormat,
+    ConversationContext,
 )
 from wintermute.ml.tokenization.wrapper import TokenizerWrapper
-from wintermute.tools.model import evaluating, extract_logits_from_model_output
+from wintermute.tools.model import (
+    evaluating,
+    extract_logits_from_model_output,
+    extract_past_key_values_from_model_output,
+)
+
+if TYPE_CHECKING:
+    from wintermute.ml.tasks.implementations.causal_lm.backend import CausalLmBackend
 
 
-class CausalLmGenerator:
+def encode_chat_context(
+    context: ConversationContext,
+    *,
+    tokenizer: TokenizerWrapper,
+    chat_format: ChatFormat,
+    assistant_prompt_format: AssistantPromptFormat | None,
+) -> tuple[str, list[int]]:
+    rendered = chat_format.render_prompt(context, assistant_prompt_format).text
+    token_ids = tokenizer.encode_to_ids(rendered, add_special_tokens=False)
+    return rendered, list(token_ids)
+
+
+def build_chat_prompt_tokens(
+    context: ConversationContext,
+    *,
+    prompt_budget: int,
+    tokenizer: TokenizerWrapper,
+    chat_format: ChatFormat,
+    assistant_prompt_format: AssistantPromptFormat | None,
+) -> tuple[str, list[int]]:
+    """Fit a chat prompt by dropping old turns, then trimming the current user."""
+    turns = context.history
+    while True:
+        readable, prompt_tokens = encode_chat_context(
+            ConversationContext(
+                current_user=context.current_user,
+                history=turns,
+                system=context.system,
+            ),
+            tokenizer=tokenizer,
+            chat_format=chat_format,
+            assistant_prompt_format=assistant_prompt_format,
+        )
+        if len(prompt_tokens) <= prompt_budget:
+            return readable, prompt_tokens
+        if not turns:
+            break
+        turns = turns[1:]
+
+    base_readable, base_prompt_tokens = encode_chat_context(
+        ConversationContext(current_user="", system=context.system),
+        tokenizer=tokenizer,
+        chat_format=chat_format,
+        assistant_prompt_format=assistant_prompt_format,
+    )
+    if len(base_prompt_tokens) > prompt_budget:
+        raise ValueError(
+            "system prompt and chat framing exceed the available context budget"
+        )
+
+    user_ids = tokenizer.encode_to_ids(context.current_user, add_special_tokens=False)
+    best_readable = base_readable
+    best_prompt_tokens = base_prompt_tokens
+    low = 0
+    high = len(user_ids)
+    while low <= high:
+        keep_count = (low + high) // 2
+        truncated_ids = user_ids[-keep_count:] if keep_count > 0 else []
+        truncated_user = tokenizer.decode(truncated_ids, skip_special_tokens=False)
+        readable, prompt_tokens = encode_chat_context(
+            ConversationContext(current_user=truncated_user, system=context.system),
+            tokenizer=tokenizer,
+            chat_format=chat_format,
+            assistant_prompt_format=assistant_prompt_format,
+        )
+        if len(prompt_tokens) <= prompt_budget:
+            best_readable = readable
+            best_prompt_tokens = prompt_tokens
+            low = keep_count + 1
+        else:
+            high = keep_count - 1
+
+    return f"**TRUNCATED **\n\n{best_readable}", best_prompt_tokens
+
+
+class CausalLmTokenGenerator:
     def __init__(
         self,
         *,
@@ -89,19 +176,21 @@ class CausalLmGenerator:
 
         with evaluating(model):
             ids = input_ids
+            model_input_ids = ids
+            past_key_values: object | None = None
 
             for _ in range(max_new_tokens):
-                with torch.autocast(
-                    device_type=self.device.type,
-                    dtype=torch.bfloat16,
-                    enabled=self.bf16_enabled,
-                ):
-                    logits = extract_logits_from_model_output(model(input_ids=ids))
+                logits, past_key_values = self._forward_model(
+                    model,
+                    model_input_ids,
+                    past_key_values,
+                )
 
                 next_id = torch.argmax(logits[:, -1, :], dim=-1, keepdim=True)
                 ids = torch.cat([ids, next_id], dim=1)
                 if all(int(tok) == eos_id for tok in next_id.view(-1).tolist()):
                     break
+                model_input_ids = next_id if past_key_values is not None else ids
 
         return cast(list[int], ids[0].tolist())
 
@@ -119,14 +208,15 @@ class CausalLmGenerator:
 
         with evaluating(model):
             ids = input_ids
+            model_input_ids = ids
+            past_key_values: object | None = None
 
             for _ in range(max_new_tokens):
-                with torch.autocast(
-                    device_type=self.device.type,
-                    dtype=torch.bfloat16,
-                    enabled=self.bf16_enabled,
-                ):
-                    logits = extract_logits_from_model_output(model(input_ids=ids))
+                logits, past_key_values = self._forward_model(
+                    model,
+                    model_input_ids,
+                    past_key_values,
+                )
                 next_logits = logits[:, -1, :]
 
                 next_logits = self._apply_repetition_penalty(
@@ -145,8 +235,30 @@ class CausalLmGenerator:
                 ids = torch.cat([ids, next_id], dim=1)
                 if all(int(tok) == eos_id for tok in next_id.view(-1).tolist()):
                     break
+                model_input_ids = next_id if past_key_values is not None else ids
 
         return cast(list[int], ids[0].tolist())
+
+    def _forward_model(
+        self,
+        model: nn.Module,
+        input_ids: torch.Tensor,
+        past_key_values: object | None,
+    ) -> tuple[torch.Tensor, object | None]:
+        with torch.autocast(
+            device_type=self.device.type,
+            dtype=torch.bfloat16,
+            enabled=self.bf16_enabled,
+        ):
+            output = model(
+                input_ids=input_ids,
+                past_key_values=past_key_values,
+                use_cache=True,
+            )
+        return (
+            extract_logits_from_model_output(output),
+            extract_past_key_values_from_model_output(output),
+        )
     
     @staticmethod
     def _apply_repetition_penalty(
@@ -197,3 +309,79 @@ class CausalLmGenerator:
 
         sampled_in_sorted = torch.multinomial(filtered, num_samples=1)
         return torch.gather(sorted_idx, dim=-1, index=sampled_in_sorted)
+
+
+@dataclass(frozen=True)
+class CausalLmGenerationTrace:
+    prompt_token_ids: tuple[int, ...]
+    completion_token_ids: tuple[int, ...]
+
+
+class CausalLmFeedbackCandidateGenerator:
+    """Sample final-answer candidates from the current policy model."""
+
+    def __init__(
+        self,
+        *,
+        backend: CausalLmBackend,
+        model: nn.Module,
+        settings: InferenceSettings | None = None,
+    ) -> None:
+        self.backend = backend
+        self.model = model
+        self.settings = settings if settings is not None else InferenceSettings()
+        self.settings.validate()
+        if self.settings.greedy:
+            raise ValueError("online feedback generation requires sampling")
+
+    def generate(
+        self,
+        contexts: Sequence[ConversationContext],
+        *,
+        candidates_per_prompt: int,
+    ) -> Sequence[Sequence[GeneratedCompletion]]:
+        if candidates_per_prompt < 2:
+            raise ValueError("candidates_per_prompt must be at least two")
+
+        context_limit = self.backend.context_token_limit(self.model)
+        if context_limit < 2:
+            raise ValueError("model context limit leaves no room for generation")
+        requested_tokens = self.settings.max_new_tokens
+        prompt_budget = max(1, context_limit - min(requested_tokens, context_limit - 1))
+
+        results: list[list[GeneratedCompletion]] = []
+        for context in contexts:
+            _, prompt_tokens = build_chat_prompt_tokens(
+                context,
+                prompt_budget=prompt_budget,
+                tokenizer=self.backend.tokenizer,
+                chat_format=self.backend.chat_format,
+                assistant_prompt_format=None,
+            )
+            max_new_tokens = min(requested_tokens, context_limit - len(prompt_tokens))
+            prompt_token_ids = tuple(prompt_tokens)
+            candidates: list[GeneratedCompletion] = []
+            for _ in range(candidates_per_prompt):
+                generated_tokens = self.backend.generator.generate(
+                    prompt_tokens,
+                    self.model,
+                    greedy=False,
+                    max_new_tokens=max_new_tokens,
+                    temperature=self.settings.temperature,
+                    top_p=self.settings.top_p,
+                    top_k=self.settings.top_k,
+                )
+                candidates.append(
+                    GeneratedCompletion(
+                        completion=self.backend.generator.decode(
+                            generated_tokens,
+                            assistant_prompt_format=None,
+                        ).final,
+                        trace=CausalLmGenerationTrace(
+                            prompt_token_ids=prompt_token_ids,
+                            completion_token_ids=tuple(generated_tokens),
+                        ),
+                    )
+                )
+            results.append(candidates)
+        return results

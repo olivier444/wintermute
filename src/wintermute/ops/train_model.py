@@ -4,7 +4,7 @@ from pathlib import Path
 
 from wintermute.ml.runs import RunManifest, RunStore
 from wintermute.tools.params import get_optional_str, get_str
-from wintermute.ml.training.config import TrainingConfig
+from wintermute.ml.training.config import RunConfig
 from wintermute.ml.training.workspace import TrainingWorkspace
 from wintermute.tools.files import yaml_load
 from wintermute.tools.logging import console_log
@@ -46,7 +46,7 @@ def _create_training_run(output_root: str, training_config_file: str) -> str:
     cfg_path = Path(training_config_file)
     parameters = yaml_load(cfg_path.parent.as_posix(), cfg_path.name)
 
-    config = TrainingConfig.from_dict(_load_training_configs(parameters))
+    config = RunConfig.from_dict(_load_training_configs(parameters))
     notes = get_str(parameters, "notes", "") or ""
     run_id = get_optional_str(parameters, "run_id") or cfg_path.stem
 

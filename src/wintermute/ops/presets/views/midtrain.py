@@ -6,6 +6,25 @@ from .transforms import text_processing, translation
 
 PRESETS = [
     _view_preset(
+        "info-extraction",
+        _composite_view_config(
+            [
+                _view_component(
+                    "mix40b-txt",
+                    0.3,
+                    include_prompt_in_loss=True,
+                    shard_offset_ratio=0.7,
+                ),
+                _view_component(
+                    "ufw-l3-qa",
+                    0.7,
+                    record_transform=text_processing.ultra_fineweb_l3_qa_transform(),
+                )                                          
+            ],
+            seed=2053,
+        ),
+    ),     
+    _view_preset(
         "translation-midtrain",
         _composite_view_config(
             [
@@ -51,7 +70,7 @@ PRESETS = [
                     0.01,
                     max_restarts=14,
                     record_transform=text_processing.orange_sum_abstract_transform(),
-                ),
+                )
             ],
             seed=2053,
         ),

@@ -4,7 +4,7 @@ from collections.abc import Iterable
 
 import torch.nn as nn
 
-from wintermute.data.iterate.dataclasses import TrainingExample
+from wintermute.ml.evaluation.limits import limit_eval_examples
 from wintermute.ml.training.eval_suite import EvalStepResult, RuntimeEvalSuite
 from wintermute.ml.training.metrics import TrainingMetricsLogger
 from wintermute.tools.model import evaluating, iter_batches
@@ -70,7 +70,7 @@ class EvaluationRunner:
             metrics = suite.task_wrapper.compute_eval_metrics(
                 self.model,
                 iter_batches(
-                    self._limit_examples(eval_view, suite.max_eval_units),
+                    limit_eval_examples(eval_view, suite.max_eval_units),
                     suite.batch_size,
                 ),
             )
@@ -78,22 +78,3 @@ class EvaluationRunner:
         if "loss" not in metrics:
             raise RuntimeError(f"Eval suite '{suite.name}' did not produce a 'loss' metric.")
         return metrics
-
-    @staticmethod
-    def _limit_examples(
-        examples: Iterable[TrainingExample],
-        max_eval_units: int | None,
-    ) -> Iterable[TrainingExample]:
-        if max_eval_units is None:
-            return examples
-
-        def limited_examples() -> Iterable[TrainingExample]:
-            units_seen = 0
-            for example in examples:
-                example_units = example.effective_units()
-                if units_seen + example_units > max_eval_units:
-                    break
-                units_seen += example_units
-                yield example
-
-        return limited_examples()

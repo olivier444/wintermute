@@ -8,7 +8,7 @@ from wintermute.data.constants import (
     TASK_SUMMARIZATION,
 )
 from wintermute.data.transform import RecordTransformConfig
-from wintermute.data.transform.config_builders import prompt_completion, to_sft
+from wintermute.data.transform.config_builders import prompt_completion, split_qa_pairs, to_sft
 
 from .prompts.text_processing import (
     _EN_SUMMARIZATION_INSTRUCTIONS,
@@ -29,6 +29,13 @@ def xp3_en_qa_transform() -> RecordTransformConfig:
     return prompt_completion(
         prompt_fields=["inputs"],
         completion_fields=["targets"],
+        task=TASK_INFORMATION_EXTRACTION,
+    )
+
+
+def ultra_fineweb_l3_qa_transform() -> RecordTransformConfig:
+    return split_qa_pairs(
+        input_field="text",
         task=TASK_INFORMATION_EXTRACTION,
     )
 

@@ -92,6 +92,9 @@ CHECKPOINT_DIRNAME = "checkpoints"
 CHECKPOINT_VAL_BEST_DIRNAME = "val_best"
 CHECKPOINT_LAST_DIRNAME = "cp_"
 CHECKPOINT_NAMED_DIRNAME = "named"
+_HISTORY_CHECKPOINT_DIR_RE = re.compile(
+    rf"{re.escape(CHECKPOINT_LAST_DIRNAME)}([0-9]+)"
+)
 _NAMED_CHECKPOINT_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
@@ -165,9 +168,15 @@ class _CheckPointStore(AbstractStore):
         run_dir = self._run_dir(run_id)
         if not run_dir.exists():
             return []
-        return sorted(
-            [path.name for path in run_dir.iterdir() if path.is_dir() and path.name.startswith(CHECKPOINT_LAST_DIRNAME)]
-        )
+
+        history_dirs: list[tuple[int, str]] = []
+        for path in run_dir.iterdir():
+            if not path.is_dir():
+                continue
+            match = _HISTORY_CHECKPOINT_DIR_RE.fullmatch(path.name)
+            if match is not None:
+                history_dirs.append((int(match.group(1)), path.name))
+        return [name for _, name in sorted(history_dirs)]
 
     def _store(self, run_id: str, bucket: str, checkpoint: CheckPoint) -> None:
         run_dir = self._run_dir(run_id)

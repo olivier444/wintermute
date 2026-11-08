@@ -51,7 +51,7 @@ class _CompletionPositionWeightedView(AbstractTrainingView):
     def __init__(
         self,
         wrapped: AbstractTrainingView,
-        objective: CausalLmObjective,
+        objective: CausalLmNtpObjective,
     ) -> None:
         self.wrapped = wrapped
         self.objective = objective
@@ -71,7 +71,7 @@ class _CompletionPositionWeightedView(AbstractTrainingView):
         return iter(self.objective._apply_completion_position_weighting(self.wrapped))
 
 
-class CausalLmObjective:
+class CausalLmNtpObjective:
     def __init__(
         self,
         *,

@@ -77,7 +77,7 @@ def _lookup_text(id: str, prompt: str, expected: str) -> Probe:
         id=id,
         prompt=prompt,
         assistant_prompt_format=_final_prompt(forced_task=TASK_INFORMATION_EXTRACTION),
-        verifier=Exact(expected),
+        verifier=Exact(expected, embedded_score=0.7),
     )
 
 
@@ -89,7 +89,7 @@ def _lookup_number(id: str, prompt: str, expected: int) -> Probe:
             forced_task=TASK_INFORMATION_EXTRACTION,
             forced_format="number",
         ),
-        verifier=Numeric(expected=expected),
+        verifier=Numeric(expected=expected, embedded_score=0.7),
     )
 
 
@@ -497,6 +497,93 @@ SFT_PROBE_SUITE = ProbeSuite(
             "Lis de haut en bas. Donne la position de « comète » sous forme de nombre uniquement.",
             6,
         ),
+        # Natural-text information extraction. Keep these deliberately simple: the
+        # difficulty comes from selecting the right fact, not from world knowledge.
+        _lookup_text(
+            "extraction/direct-city-en",
+            "Read the note.\\n"
+            "Note: Mira arrived in Bergen on Monday for a short workshop.\\n"
+            "Which city did Mira arrive in? Answer with the city only.",
+            "Bergen",
+        ),
+        _lookup_text(
+            "extraction/direct-object-fr",
+            "Lis la note.\\n"
+            "Note : Paul a rangé le dossier rouge dans le tiroir après la réunion.\\n"
+            "Quel objet Paul a-t-il rangé ? Réponds uniquement avec l'objet.",
+            "dossier rouge",
+        ),
+        _lookup_number(
+            "extraction/direct-count-en",
+            "Read the note.\\n"
+            "Note: The small van carried 18 boxes to the warehouse.\\n"
+            "How many boxes did the van carry? Answer with the number only.",
+            18,
+        ),
+        _lookup_number(
+            "extraction/direct-count-fr",
+            "Lis la note.\\n"
+            "Note : Le café a servi 27 déjeuners mardi.\\n"
+            "Combien de déjeuners ont été servis mardi ? Réponds uniquement avec le nombre.",
+            27,
+        ),
+        _lookup_text(
+            "extraction/distractor-person-en",
+            "Read the report.\\n"
+            "Report: Nora prepared the slides. Victor booked room C. Elena sent the invitations.\\n"
+            "Who booked the room? Answer with the name only.",
+            "Victor",
+        ),
+        _lookup_number(
+            "extraction/distractor-number-en",
+            "Read the report.\\n"
+            "Report: The shop sold 14 lamps on Monday, 23 on Tuesday, and 19 on Wednesday.\\n"
+            "How many lamps were sold on Tuesday? Answer with the number only.",
+            23,
+        ),
+        _lookup_text(
+            "extraction/distractor-place-fr",
+            "Lis le rapport.\\n"
+            "Rapport : Léa travaille à Lille, Marc à Dijon et Inès à Tours.\\n"
+            "Dans quelle ville travaille Marc ? Réponds uniquement avec la ville.",
+            "Dijon",
+        ),
+        _lookup_number(
+            "extraction/distractor-number-fr",
+            "Lis le rapport.\\n"
+            "Rapport : Le train A transporte 61 passagers, le train B 48 passagers et le train C 73 passagers.\\n"
+            "Combien de passagers transporte le train B ? Réponds uniquement avec le nombre.",
+            48,
+        ),
+        _lookup_text(
+            "extraction/paraphrase-owner-en",
+            "Read the note.\\n"
+            "Note: Sofia is responsible for the Atlas project. Karim works on the documentation.\\n"
+            "Who manages the Atlas project? Answer with the name only.",
+            "Sofia",
+        ),
+        _lookup_text(
+            "extraction/paraphrase-location-fr",
+            "Lis la note.\\n"
+            "Note : Le colis destiné à Hugo a été déposé à l'accueil.\\n"
+            "Où Hugo doit-il récupérer son colis ? Réponds uniquement avec le lieu.",
+            "accueil",
+        ),
+        _lookup_text(
+            "extraction/coreference-place-en",
+            "Read the note.\\n"
+            "Note: Leila gave the package to Omar. He put it on the shelf.\\n"
+            "Where is the package now? Answer with the place only.",
+            "shelf",
+        ),
+        _lookup_text(
+            "extraction/coreference-person-fr",
+            "Lis la note.\\n"
+            "Note : Emma a donné la clé à Lucas. Il l'a ensuite rangée dans sa poche.\\n"
+            "Qui a rangé la clé dans sa poche ? Réponds uniquement avec le prénom.",
+            "Lucas",
+        ),
+
         _number(
             "structured/odd-gender-out-1",
             "1. Ethan\n"

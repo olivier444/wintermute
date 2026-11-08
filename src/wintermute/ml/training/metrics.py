@@ -4,7 +4,6 @@ import math
 from collections.abc import Mapping
 from numbers import Real
 
-from wintermute.data.iterate.training_view import TrainingViewIterationStats
 from wintermute.ml.training.logger import Logger
 from wintermute.ml.training.optimizer_diagnostics import (
     FirstUpdateDiagnostics,
@@ -203,46 +202,11 @@ class TrainingMetricsLogger:
 
     def log_training_view(
         self,
-        stats: TrainingViewIterationStats,
+        metrics: Mapping[str, float],
         *,
         global_step: int,
     ) -> None:
-        total_candidates = max(1, stats.sft_candidates)
-        scratchpad_examples = max(1, stats.sft_examples_with_scratchpad)
-        system_prompt_examples = max(1, stats.sft_examples_with_system_prompt)
-        history_examples = max(1, stats.sft_examples_with_history)
-        values = {
-            "data/sft/emitted_pct": 100.0 * stats.sft_emitted / total_candidates,
-            "data/sft/rejected_pct": 100.0 * stats.sft_rejected / total_candidates,
-            "data/sft/scratchpad_removed_pct": (
-                100.0 * stats.sft_scratchpad_removed / total_candidates
-            ),
-            "data/sft/history_reduced_pct": (
-                100.0 * stats.sft_history_reduced / total_candidates
-            ),
-            "data/sft/history_turns_dropped_total": float(
-                stats.sft_history_turns_dropped_total
-            ),
-            "data/sft/history_turns_dropped_avg": (
-                stats.sft_history_turns_dropped_total / history_examples
-            ),
-            "data/sft/system_prompt_dropped_pct": (
-                100.0 * stats.sft_system_prompt_dropped / total_candidates
-            ),
-            "data/sft/scratchpad_removed_pct_of_scratchpad_examples": (
-                100.0 * stats.sft_scratchpad_removed / scratchpad_examples
-            ),
-            "data/sft/system_prompt_dropped_pct_of_system_prompt_examples": (
-                100.0 * stats.sft_system_prompt_dropped / system_prompt_examples
-            ),
-            "data/sft/reject_required_turn_too_long_pct": (
-                100.0 * stats.sft_reject_required_turn_too_long / total_candidates
-            ),
-            "data/sft/reject_invalid_example_pct": (
-                100.0 * stats.sft_reject_invalid_example / total_candidates
-            ),
-        }
-        for name, value in values.items():
+        for name, value in metrics.items():
             self.logger.log_scalar(name, value, global_step)
 
     def _log_first_update(

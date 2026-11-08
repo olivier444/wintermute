@@ -22,13 +22,13 @@ ESTIMATED_CHARS_PER_TOKEN = 4.0
 def _fmt_int(v: Any) -> str:
     if v is None:
         return "n/a"
-    return f"{int(v):_}"
+    return f"{int(v):,}"
 
 
 def _fmt_float(v: Any, digits: int = 2) -> str:
     if v is None:
         return "n/a"
-    return f"{float(v):.{digits}f}"
+    return f"{float(v):,.{digits}f}"
 
 
 def _fmt_pct(v: Any) -> str:

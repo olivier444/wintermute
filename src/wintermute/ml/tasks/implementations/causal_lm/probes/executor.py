@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch.nn as nn
 
-from wintermute.ml.tasks.implementations.causal_lm.generation import CausalLmGenerator
+from wintermute.ml.tasks.implementations.causal_lm.generation import CausalLmTokenGenerator
 from wintermute.ml.tasks.implementations.causal_lm.probes.base import (
     ProbeReport,
     ProbeResult,
@@ -24,7 +24,7 @@ class CausalLmProbeExecutor:
         *,
         tokenizer: TokenizerWrapper,
         chat_format: ChatFormat,
-        generator: CausalLmGenerator,
+        generator: CausalLmTokenGenerator,
     ) -> None:
         self.tokenizer = tokenizer
         self.chat_format = chat_format

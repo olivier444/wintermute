@@ -13,9 +13,9 @@ Stage role: **base pretraining**.
 | Primary eval | `mix40b-txt` |
 | Include prompt in loss | `True` |
 | Batch size | `12` |
-| Grad accum units | `500000` initially; raised live to `750000`, then `1000000` |
-| Planned training units | `41000000000` |
-| Terminal units seen | `24368459165` (`59%`) |
+| Grad accum units | `500,000` initially; raised live to `750,000`, then `1,000,000` |
+| Planned training units | `41,000,000,000` |
+| Terminal units seen | `24,368,459,165` (`59%`) |
 | LR schedule | `max=0.0003`, `end=5e-05`, `warmup=0.006`, `decay_start=0.9`; subsequently adjusted live |
 | Optimizer | AdamW, `beta1=0.9`, `beta2=0.95`, `eps=1e-08`, initial `weight_decay=0.05` |
 | Config note | Newer Qwen-like architecture with fixed initialization and tokenizer; QK normalization enabled. |
@@ -45,11 +45,11 @@ Materialized audits estimate tokens at four characters per token; trainer-side t
 
 | Role | Snapshot | Split | Examples | Unique examples | Approx tokens | Chars | Avg chars/ex | Sources | Duplicate rate | Oversampling extra ex | Oversampling extra chars | Main Hugging Face sources |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `train` | `mix40b-txt` | `train` | 31,110,539 | 29,911,107 | 39,999,869,385 | 159,999,477,538 | 5142.9 | 28 | 0.00% | 1,199,432 | 4,462,674,660 | HuggingFaceFW/fineweb-edu (28.4%); epfml/FineWeb2-HQ (11.8%); open-web-math/open-web-math (11.8%) |
-| `eval` | `mix40b-txt` | `eval` | 2,064 | 1,993 | 2,515,091 | 10,060,364 | 4874.2 | 23 | 0.00% | 71 | 270,852 | HuggingFaceFW/fineweb-edu (28.1%); open-web-math/open-web-math (12.8%); epfml/FineWeb2-HQ (11.6%) |
-| `eval` | `default4-txt` | `eval3` | 2,443 | 2,319 | 2,453,112 | 9,812,448 | 4016.6 | 9 | 0.12% | 124 | 521,905 | HuggingFaceFW/fineweb-edu (30.6%); HuggingFaceFW/fineweb (20.4%); HuggingFaceTB/cosmopedia [stories] (15.3%) |
-| `eval` | `code-txt` | `eval` | 1,855 | 1,855 | 2,487,695 | 9,950,778 | 5364.3 | 2 | 0.00% | 0 | 0 | bigcode/the-stack-dedup [Python] (75.4%); bigcode/the-stack-dedup [other] (24.6%) |
-| `eval` | `french-txt` | `eval` | 2,977 | 2,977 | 2,495,420 | 9,981,679 | 3352.9 | 2 | 0.00% | 0 | 0 | epfml/FineWeb2-HQ (80.6%); wikimedia/wikipedia [French] (19.4%) |
+| `train` | `mix40b-txt` | `train` | 31,110,539 | 29,911,107 | 39,999,869,385 | 159,999,477,538 | 5,142.9 | 28 | 0.00% | 1,199,432 | 4,462,674,660 | HuggingFaceFW/fineweb-edu (28.4%); epfml/FineWeb2-HQ (11.8%); open-web-math/open-web-math (11.8%) |
+| `eval` | `mix40b-txt` | `eval` | 2,064 | 1,993 | 2,515,091 | 10,060,364 | 4,874.2 | 23 | 0.00% | 71 | 270,852 | HuggingFaceFW/fineweb-edu (28.1%); open-web-math/open-web-math (12.8%); epfml/FineWeb2-HQ (11.6%) |
+| `eval` | `default4-txt` | `eval3` | 2,443 | 2,319 | 2,453,112 | 9,812,448 | 4,016.6 | 9 | 0.12% | 124 | 521,905 | HuggingFaceFW/fineweb-edu (30.6%); HuggingFaceFW/fineweb (20.4%); HuggingFaceTB/cosmopedia [stories] (15.3%) |
+| `eval` | `code-txt` | `eval` | 1,855 | 1,855 | 2,487,695 | 9,950,778 | 5,364.3 | 2 | 0.00% | 0 | 0 | bigcode/the-stack-dedup [Python] (75.4%); bigcode/the-stack-dedup [other] (24.6%) |
+| `eval` | `french-txt` | `eval` | 2,977 | 2,977 | 2,495,420 | 9,981,679 | 3,352.9 | 2 | 0.00% | 0 | 0 | epfml/FineWeb2-HQ (80.6%); wikimedia/wikipedia [French] (19.4%) |
 
 ### Declared Training Recipe
 
@@ -127,32 +127,32 @@ The persisted run description records the values active at run creation; the cur
 | --- | --- |
 | 2026-07-07 to 2026-07-08 | Gradient clipping reduced from `5` to `3`, then `2`, then `1`. |
 | 2026-07-13 | Checkpoint cadence changed from `100` to `200` optimizer batches. |
-| 2026-07-15 | Training resumed from checkpoint `19000` after a short interruption. |
+| 2026-07-15 | Training resumed from checkpoint `19,000` after a short interruption. |
 | 2026-07-16 to 2026-07-17 | Maximum LR was temporarily raised as high as `0.0004`, then returned to `0.0003`; gradient-noise estimation was enabled and varied between 4 and 8 update batches. |
-| 2026-07-19 | Gradient accumulation rose to `750000` units; gradient-noise estimation was disabled later that day. |
+| 2026-07-19 | Gradient accumulation rose to `750,000` units; gradient-noise estimation was disabled later that day. |
 | 2026-07-20 | Weight decay changed from `0.05` to `0.01`. |
-| 2026-07-22 | Gradient accumulation rose to `1000000`, checkpoint cadence changed to `150`, and gradient clipping fell to `0.5`. |
+| 2026-07-22 | Gradient accumulation rose to `1,000,000`, checkpoint cadence changed to `150`, and gradient clipping fell to `0.5`. |
 | 2026-07-23 to 2026-07-27 | Maximum LR was manually stepped down through several values, ending at `0.0001`. |
 
 ### Last-Checkpoint Metrics
 
 | Eval | First step | First loss | First top10 | First bpb | Last step | Last loss | Last top10 | Last bpb |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `mix40b-txt` | 100 | 6.528862 | 0.408215 | 2.492634 | 38700 | 2.042538 | 0.837065 | 0.779815 |
-| `def4` | 100 | 6.932056 | 0.358921 | 2.281033 | 38700 | 2.267161 | 0.817303 | 0.746022 |
-| `code` | 100 | 6.122239 | 0.466919 | 3.290305 | 38700 | 1.298458 | 0.892272 | 0.697837 |
-| `french` | 100 | 7.100813 | 0.360860 | 2.546442 | 38700 | 2.348080 | 0.804750 | 0.842051 |
+| `mix40b-txt` | 100 | 6.528862 | 0.408215 | 2.492634 | 38,700 | 2.042538 | 0.837065 | 0.779815 |
+| `def4` | 100 | 6.932056 | 0.358921 | 2.281033 | 38,700 | 2.267161 | 0.817303 | 0.746022 |
+| `code` | 100 | 6.122239 | 0.466919 | 3.290305 | 38,700 | 1.298458 | 0.892272 | 0.697837 |
+| `french` | 100 | 7.100813 | 0.360860 | 2.546442 | 38,700 | 2.348080 | 0.804750 | 0.842051 |
 
 ### Runtime Performance
 
 | Metric | Value |
 | --- | ---: |
-| Average allocated VRAM | 6166.13 MB |
-| Average reserved VRAM | 14198.87 MB |
-| Peak allocated VRAM | 12896.49 MB |
-| Peak reserved VRAM | 14942.00 MB |
-| Average throughput | 13703.52 units/sec |
-| Median throughput | 13574.44 units/sec |
+| Average allocated VRAM | 6,166.13 MB |
+| Average reserved VRAM | 14,198.87 MB |
+| Peak allocated VRAM | 12,896.49 MB |
+| Peak reserved VRAM | 14,942.00 MB |
+| Average throughput | 13,703.52 units/sec |
+| Median throughput | 13,574.44 units/sec |
 | Average sec/step | 44.23 s |
 | Median sec/step | 37.33 s |
 | Average eval/checkpoint time | 246.94 s |

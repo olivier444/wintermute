@@ -7,6 +7,7 @@ from typing import Dict
 import torch.nn as nn
 
 from wintermute.data.iterate.dataclasses import TrainingViewConfig
+from wintermute.ml.evaluation.limits import limit_eval_examples
 from wintermute.ml.tasks.factory import TaskWrapper
 from wintermute.tools.logging import console_log
 from wintermute.tools.model import evaluating, unload_from_gpu, iter_batches
@@ -16,7 +17,9 @@ class BaselineSuite(ABC):
     @abstractmethod
     def compute_eval_metrics(
         self,
-        view_config: TrainingViewConfig
+        view_config: TrainingViewConfig,
+        *,
+        max_eval_units: int | None = None,
     ) -> Dict[str, Dict[str, float]]: ...
 
     def benchmark_evaluators(self) -> Sequence[BaselineEvaluator]:
@@ -26,8 +29,11 @@ class BaselineSuite(ABC):
 class NoBaselineSuite(BaselineSuite):
     def compute_eval_metrics(
         self,
-        view_config: TrainingViewConfig
+        view_config: TrainingViewConfig,
+        *,
+        max_eval_units: int | None = None,
     ) -> Dict[str, Dict[str, float]]:
+        del max_eval_units
         return {}
 
 
@@ -49,7 +55,9 @@ class BaselineEvaluator:
     def compute_eval_metrics(
         self,
         view_config: TrainingViewConfig,
-        output_root: str
+        output_root: str,
+        *,
+        max_eval_units: int | None = None,
     ) -> Dict[str, float]:
         self.model = self.model.to(self.task_wrapper.device)
 
@@ -62,7 +70,10 @@ class BaselineEvaluator:
         )
         
         with evaluating(self.model):
-            batches = iter_batches(view, self.batch_size)
+            batches = iter_batches(
+                limit_eval_examples(view, max_eval_units),
+                self.batch_size,
+            )
             result = self.task_wrapper.compute_eval_metrics(self.model, batches)
             self.model = unload_from_gpu(self.model)
             return result

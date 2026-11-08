@@ -7,12 +7,13 @@ from typing import Mapping
 
 from wintermute.ml.inference.service import (
     InferenceConversationService,
-    InferenceConversationState,
+    InferenceConversationSnapshot,
     InferenceServiceResult,
     InferenceTranscriptEvent,
 )
+from wintermute.ml.inference.conversation import InferenceSettings, InferenceSettingsDescription
 from wintermute.ml.inference.session_log import InferenceSessionJsonStore
-from wintermute.ml.inference.workspace import InferenceWorkspace
+from wintermute.ml.inference.components_loader import InferenceComponentsLoader
 from wintermute.ml.tokenization.chat_format import AssistantCompletion
 from wintermute.tools.logging import console_log
 from wintermute.tools.slack.runtime import SlackInferenceRuntime, SlackPostedThreadReply, SlackThreadMessage
@@ -40,8 +41,6 @@ class SlackInferenceEndpoint:
             raise ValueError(f"default inference model '{self._active_model_name}' is not configured")
         self._device = device
         self._system_prompt = system_prompt
-        self._use_chat_format = True
-        self._force_final = False
         self._poll_interval_sec = float(poll_interval_sec)
         self._service = self._build_service(self._models[self._active_model_name])
         self._session_logs = InferenceSessionJsonStore(
@@ -119,24 +118,6 @@ class SlackInferenceEndpoint:
 
     def _handle_endpoint_command(self, message: SlackThreadMessage) -> bool:
         clean_text = message.text.strip()
-        chat_format_enabled = _parse_format_command(clean_text)
-        if chat_format_enabled is not None:
-            self._set_chat_format_enabled(chat_format_enabled)
-            self._safe_post_reply(
-                thread_ts=message.thread_ts,
-                text=f"[info] chat_format={'on' if chat_format_enabled else 'off'} for the whole endpoint",
-            )
-            return True
-
-        force_final = _parse_force_final_command(clean_text)
-        if force_final is not None:
-            self._set_force_final(force_final)
-            self._safe_post_reply(
-                thread_ts=message.thread_ts,
-                text=f"[info] force_final={'on' if force_final else 'off'} for the whole endpoint",
-            )
-            return True
-
         device = _parse_device_command(clean_text)
         if device is not None:
             self._set_device(device)
@@ -153,7 +134,7 @@ class SlackInferenceEndpoint:
             return True
 
         if clean_text == "!again":
-            self._switch_model_for_message(message, self._active_model_name)
+            self._regenerate_last_for_message(message)
             return True
 
         if clean_text == "!sp":
@@ -192,6 +173,26 @@ class SlackInferenceEndpoint:
 
         return False
 
+    def _regenerate_last_for_message(self, message: SlackThreadMessage) -> None:
+        result = self._service.regenerate_last(conversation_id=message.thread_ts)
+        if result is None:
+            self._safe_post_reply(
+                thread_ts=message.thread_ts,
+                text="[info] no previous conversation turn to regenerate",
+            )
+            return
+
+        posted_reply = self._safe_post_reply(
+            thread_ts=message.thread_ts,
+            text=_format_slack_inference_result(result),
+        )
+        if posted_reply is not None:
+            self._session_logs.replace_last_assistant_message(
+                thread_ts=message.thread_ts,
+                content=posted_reply.text,
+                slack_ts=posted_reply.ts,
+            )
+
     def _describe_models(self) -> str:
         lines: list[str] = []
         for model_name, target in self._models.items():
@@ -206,15 +207,15 @@ class SlackInferenceEndpoint:
     def _switch_model_for_message(self, message: SlackThreadMessage, requested_name: str) -> None:
         model_name, target = self._resolve_model(requested_name)
 
-        preserved_states = self._service.export_conversation_states()
+        preserved_snapshots = self._service.export_conversation_snapshots()
         regeneration_prompt = self._truncate_last_turn(
-            preserved_states,
+            preserved_snapshots,
             conversation_id=message.thread_ts,
         )
 
         self._rebuild_service(
             target=target,
-            preserved_states=preserved_states,
+            preserved_snapshots=preserved_snapshots,
         )
         self._active_model_name = model_name
 
@@ -257,24 +258,20 @@ class SlackInferenceEndpoint:
 
     def _truncate_last_turn(
         self,
-        states: dict[str, InferenceConversationState],
+        snapshots: dict[str, InferenceConversationSnapshot],
         *,
         conversation_id: str,
     ) -> str | None:
-        state = states.get(conversation_id)
-        if state is None or not state.session_state.turns:
+        snapshot = snapshots.get(conversation_id)
+        if snapshot is None or not snapshot.turns:
             return None
 
-        last_turn = state.session_state.turns[-1]
-        states[conversation_id] = replace(
-            state,
-            session_state=replace(
-                state.session_state,
-                turns=state.session_state.turns[:-1],
-            ),
+        last_turn = snapshot.turns[-1]
+        snapshots[conversation_id] = replace(
+            snapshot,
+            turns=snapshot.turns[:-1],
         )
         return last_turn.user_text
-
 
     def _describe_system_prompt(self) -> str:
         clean_prompt = self._system_prompt.strip()
@@ -303,44 +300,28 @@ class SlackInferenceEndpoint:
         )
 
     def _set_system_prompt(self, new_system_prompt: str) -> None:
-        preserved_states = self._service.export_conversation_states()
-        preserved_states = {
-            conversation_id: replace(state, system_prompt_logged=False)
-            for conversation_id, state in preserved_states.items()
+        preserved_snapshots = self._service.export_conversation_snapshots()
+        preserved_snapshots = {
+            conversation_id: replace(snapshot, system_prompt_logged=False)
+            for conversation_id, snapshot in preserved_snapshots.items()
         }
         self._system_prompt = new_system_prompt.strip()
         self._rebuild_service(
             target=self._models[self._active_model_name],
-            preserved_states=preserved_states,
+            preserved_snapshots=preserved_snapshots,
         )
-
-    def _set_chat_format_enabled(self, enabled: bool) -> None:
-        next_value = bool(enabled)
-        if self._use_chat_format == next_value:
-            return
-
-        preserved_states = self._service.export_conversation_states()
-        self._use_chat_format = next_value
-        self._rebuild_service(
-            target=self._models[self._active_model_name],
-            preserved_states=preserved_states,
-        )
-
-    def _set_force_final(self, enabled: bool) -> None:
-        self._force_final = bool(enabled)
-        self._service.set_force_final(self._force_final)
 
     def _set_device(self, device: str) -> None:
         if self._device == device:
             return
 
-        preserved_states = self._service.export_conversation_states()
+        preserved_snapshots = self._service.export_conversation_snapshots()
         previous_device = self._device
         self._device = device
         try:
             self._rebuild_service(
                 target=self._models[self._active_model_name],
-                preserved_states=preserved_states,
+                preserved_snapshots=preserved_snapshots,
             )
         except Exception:
             self._device = previous_device
@@ -352,11 +333,12 @@ class SlackInferenceEndpoint:
         self,
         *,
         target: tuple[str, str | None],
-        preserved_states: dict[str, InferenceConversationState],
+        preserved_snapshots: dict[str, InferenceConversationSnapshot],
     ) -> None:
-        next_service = self._build_service(target)
+        settings = self._service.export_settings()
+        next_service = self._build_service(target, settings=settings)
         try:
-            next_service.restore_conversation_states(preserved_states)
+            next_service.restore_conversation_snapshots(preserved_snapshots)
         except Exception:
             next_service.close()
             raise
@@ -365,27 +347,28 @@ class SlackInferenceEndpoint:
         self._service = next_service
         previous_service.close()
 
-    def _build_service(self, target: tuple[str, str | None]) -> InferenceConversationService:
+    def _build_service(
+        self,
+        target: tuple[str, str | None],
+        *,
+        settings: InferenceSettings | None = None,
+    ) -> InferenceConversationService:
         run_id, external_model_name = target
-        workspace = InferenceWorkspace.open(
+        loader = InferenceComponentsLoader.open(
             self._root,
             run_id,
             load_slack_config=True,
         )
-        try:
-            task_wrapper, model = workspace.create_components(
-                device_override=self._device,
-                external_model_name=external_model_name,
-            )
-        finally:
-            workspace.close()
+        task_wrapper, model = loader.load(
+            device_override=self._device,
+            external_model_name=external_model_name,
+        )
 
         return InferenceConversationService(
             task_wrapper=task_wrapper,
             model=model,
             system_prompt=self._system_prompt,
-            use_chat_format=self._use_chat_format,
-            force_final=self._force_final,
+            settings=settings,
         )
 
     def _safe_post_reply(self, *, thread_ts: str, text: str) -> SlackPostedThreadReply | None:
@@ -431,24 +414,6 @@ class SlackInferenceEndpoint:
         )
 
 
-def _parse_format_command(text: str) -> bool | None:
-    parts = text.strip().lower().split()
-    if not parts or parts[0] != "!format":
-        return None
-    if len(parts) != 2 or parts[1] not in {"on", "off"}:
-        raise ValueError("command 'format' requires 'on' or 'off'")
-    return parts[1] == "on"
-
-
-def _parse_force_final_command(text: str) -> bool | None:
-    parts = text.strip().lower().split()
-    if not parts or parts[0] != "!force_final":
-        return None
-    if len(parts) != 2 or parts[1] not in {"on", "off"}:
-        raise ValueError("command 'force_final' requires 'on' or 'off'")
-    return parts[1] == "on"
-
-
 def _parse_device_command(text: str) -> str | None:
     parts = text.strip().lower().split()
     if not parts or parts[0] != "!device":
@@ -459,6 +424,10 @@ def _parse_device_command(text: str) -> str | None:
 
 
 def _format_slack_inference_result(result: InferenceServiceResult) -> str:
+    if isinstance(result.reply, InferenceSettingsDescription):
+        return "[info] inference settings\n" + format_slack_code_block(
+            "\n".join(result.reply.lines)
+        )
     if not isinstance(result.reply, AssistantCompletion):
         return result.reply_text
     completion = result.reply

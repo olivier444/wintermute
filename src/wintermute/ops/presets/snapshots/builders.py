@@ -52,6 +52,7 @@ def qa_pairs_sft_src(
     weight: float,
     *,
     field: str = "content",
+    task: str | Mapping[str, Any] | None = None,
     oversampling: int = 1,
     min_chars: int = 200,
     max_chars: int = MAX_RECORD_SIZE_CHARS,
@@ -63,7 +64,7 @@ def qa_pairs_sft_src(
         min_chars=min_chars,
         max_chars=max_chars,
         excluded_snapshot_ids=excluded_snapshot_ids,
-        record_transform=transform_configs.split_qa_pairs(input_field=field),
+        record_transform=transform_configs.split_qa_pairs(input_field=field, task=task),
     )
 
 

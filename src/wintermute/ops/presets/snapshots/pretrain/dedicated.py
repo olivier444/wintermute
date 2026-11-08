@@ -48,6 +48,7 @@ DEDICATED_PRETRAIN_SNAPSHOT_PRESETS = [
     # Purpose: Standalone contextual-retrieval and comprehension continued-pretraining data.
     # Output format: NTP text.
     # Composition: OpenBMB Ultra-FineWeb-L3 English synthetic QA content only.
+    # Runtime task mapping: TASK_INFORMATION_EXTRACTION in every task-facing QA view.
     # Budget: Up to 36B train chars, covering the complete locally sampled source.
     # Selection: Deduplicated records of at least 200 characters, without oversampling.
     SnapshotPreset(

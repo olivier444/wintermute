@@ -6,6 +6,7 @@ import torch.nn.functional as F
 
 from wintermute.ml.models.builders.rope import apply_rope
 from wintermute.ml.models.builders.mlp import build_mlp
+from wintermute.ml.models.model_output import LayerKvCache
 
 
 def build_norm(norm: str, d_model: int) -> nn.Module:
@@ -67,46 +68,116 @@ class DecoderBlock(nn.Module):
         self.dropout = dropout
 
     def forward(self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
-        B, T, C = x.shape
+        x, _ = self._forward(x, cos, sin)
+        return x
+
+    def forward_with_cache(
+        self,
+        x: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        past_key_value: LayerKvCache | None,
+        cache_capacity: int,
+    ) -> tuple[torch.Tensor, LayerKvCache]:
+        x, present_key_value = self._forward(
+            x,
+            cos,
+            sin,
+            past_key_value,
+            cache_capacity,
+        )
+        assert present_key_value is not None
+        return x, present_key_value
+
+    def _forward(
+        self,
+        x: torch.Tensor,
+        cos: torch.Tensor, # kv cache offset is already applied here - shape is 1 x 1 x T x D
+        sin: torch.Tensor, # kv cache offset is already applied here - shape is 1 x 1 x T x D
+        past_key_value: LayerKvCache | None = None,
+        cache_capacity: int | None = None,
+    ) -> tuple[torch.Tensor, LayerKvCache | None]:
+        # B = batch size
+        # T = current input length: full sequence without a past cache,
+        #     new tokens only with a past cache
+        # C = d_model
+        # H = q head count
+        # G = kv head count ... R = H / G (query head per kv head)
+        # D = head dim ... C = H * D
+        # P = previous tokens (already in kv cache) ... total seq len = P + T
+
+        # compute:
+        #    x1 = input + attention(norm1(input))
+        #    output = x1 + mlp(norm2(x1))
+
+        B, T, C = x.shape       # B x T x C
 
         # ---- attention ----
 
-        h = self.ln1(x)
+        h = self.ln1(x)         # B x T x C
 
-        q = self.q_proj(h)
-        k = self.k_proj(h)
-        v = self.v_proj(h)
+        q = self.q_proj(h)      # B x T x (H * D)
+        k = self.k_proj(h)      # B x T x (G * D)
+        v = self.v_proj(h)      # B x T x (G * D)
 
-        q = q.view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
-        k = k.view(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)
-        v = v.view(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        q = q.view(B, T, self.n_heads, self.head_dim)       # B x T x H x D
+        k = k.view(B, T, self.n_kv_heads, self.head_dim)    # B x T x G x D
+        v = v.view(B, T, self.n_kv_heads, self.head_dim)    # B x T x G x D
+
+        q = q.transpose(1, 2)      # B x H x T x D
+        k = k.transpose(1, 2)      # B x G x T x D
+        v = v.transpose(1, 2)      # B x G x T x D
 
         if self.qk_norm:
             q = self.q_norm(q)
             k = self.k_norm(k)
 
-        q = apply_rope(q, cos[:, :, :T, :], sin[:, :, :T, :])
-        k = apply_rope(k, cos[:, :, :T, :], sin[:, :, :T, :])
+        q = apply_rope(q, cos, sin)
+        k = apply_rope(k, cos, sin)
+
+        present_key_value = None
+        if cache_capacity is not None:
+            if past_key_value is None:
+                key_cache = k.new_empty((B, self.n_kv_heads, cache_capacity, self.head_dim))
+                value_cache = v.new_empty((B, self.n_kv_heads, cache_capacity, self.head_dim))
+                past_length = 0
+            else:
+                key_cache = past_key_value.key
+                value_cache = past_key_value.value
+                past_length = past_key_value.length
+
+            cache_end = past_length + T
+            key_cache[:, :, past_length:cache_end, :].copy_(k)
+            value_cache[:, :, past_length:cache_end, :].copy_(v)
+            present_key_value = LayerKvCache(
+                key=key_cache,
+                value=value_cache,
+                length=cache_end,
+            )
+            k = key_cache[:, :, :cache_end, :]
+            v = value_cache[:, :, :cache_end, :]
 
         if self.n_kv_heads != self.n_heads:
-            k = k.repeat_interleave(self.q_per_kv, dim=1)
-            v = v.repeat_interleave(self.q_per_kv, dim=1)
+            k = k.repeat_interleave(self.q_per_kv, dim=1) # B x H x (P + T) x D
+            v = v.repeat_interleave(self.q_per_kv, dim=1) # B x H x (P + T) x D
 
         attn = F.scaled_dot_product_attention(
-            q,
-            k,
-            v,
-            is_causal=True,
+            q,                                      # B x H x T x D
+            k,                                      # B x H x (P + T) x D
+            v,                                      # B x H x (P + T) x D
+            # Cached decoding uses no mask because DecoderV2 guarantees T == 1.
+            is_causal=past_key_value is None,
             dropout_p=self.dropout if self.training else 0.0,
-        )
+        ) # same as q: B x H x T x D
 
-        attn = attn.transpose(1, 2).contiguous().view(B, T, C)
+        attn = attn.transpose(1, 2).contiguous()  # B x T x H x D
+        attn = attn.view(B, T, C) # B x T x (H * D) = B x T x C
         x = x + self.proj(attn)
 
         # ---- mlp ----
 
         h = self.ln2(x)
-        h = self.mlp(h)
-        x = x + h
+        h = self.mlp(h)         # B x T x C
+        x = x + h               # B x T x C
 
-        return x
+        return x, present_key_value

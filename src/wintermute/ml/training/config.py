@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, asdict, field
 from typing import Any, Dict, List, Mapping, Optional
 from wintermute.ml.models.specifications import ModelSpecification
@@ -8,6 +9,7 @@ from wintermute.ops.presets.registry import get_training_view_preset
 from wintermute.tools.files import yaml_load, yaml_save
 from wintermute.tools.params import (
     get_bool,
+    get_float,
     get_int,
     get_optional_int,
     get_optional_list,
@@ -21,7 +23,7 @@ from wintermute.ml.training.task_specification import TaskSpecification
 
 
 @dataclass
-class TrainingConfig:
+class RunConfig:
     task_config: TaskSpecification
     model_config: ModelSpecification
     reference_run_id: Optional[str]
@@ -33,7 +35,6 @@ class TrainingConfig:
     evaluation_configs: List[EvaluationConfig]
     benchmark_config: Optional[BenchmarkConfig] = None
     reference_checkpoint: Optional[str] = None
-    load_reference_optimizer_state: bool = False
     baseline_config: Dict[str, Any] = field(default_factory=dict)
     slack_config: Optional[SlackConfig] = None
     slack_config_payload: Optional[Dict[str, Any]] = field(default=None, repr=False)
@@ -45,7 +46,7 @@ class TrainingConfig:
         data: dict,
         *,
         load_slack_config: bool = True,
-    ) -> TrainingConfig:
+    ) -> RunConfig:
         d = dict(data)
         if "task_config" not in d or d["task_config"] is None:
             raise ValueError("training config must define 'task_config'")
@@ -53,15 +54,16 @@ class TrainingConfig:
 
         d["model_config"] = ModelSpecification.from_dict(d["model_config"])
         d["reference_checkpoint"] = get_optional_str(d, "reference_checkpoint")
-        d["load_reference_optimizer_state"] = get_bool(d, "load_reference_optimizer_state", False)
+        legacy_load_optimizer_state = get_bool(
+            d,
+            "load_reference_optimizer_state",
+            False,
+        )
+        d.pop("load_reference_optimizer_state", None)
         if d["reference_checkpoint"] is not None and not d["reference_checkpoint"].strip():
             raise ValueError("training config 'reference_checkpoint' must be a non-empty selector when provided.")
         if d["reference_checkpoint"] is not None and not d.get("reference_run_id"):
             raise ValueError("training config 'reference_checkpoint' requires 'reference_run_id'.")
-        if d["load_reference_optimizer_state"] and d["reference_checkpoint"] is None:
-            raise ValueError(
-                "training config 'load_reference_optimizer_state' requires 'reference_checkpoint'."
-            )
         if "training_view_config" in d:
             raise ValueError(
                 "training config no longer supports inline 'training_view_config'; "
@@ -78,7 +80,24 @@ class TrainingConfig:
         raw_trainer_config = get_optional_mapping(d, "trainer_config")
         if raw_trainer_config is None:
             raise ValueError("training config must define 'trainer_config'")
-        d["trainer_config"] = TrainerConfig.from_dict(dict(raw_trainer_config))
+        trainer_payload = dict(raw_trainer_config)
+        if legacy_load_optimizer_state:
+            if "load_reference_optimizer_state" in trainer_payload:
+                raise ValueError(
+                    "load_reference_optimizer_state cannot be defined both at the run "
+                    "and trainer config levels"
+                )
+            trainer_payload["load_reference_optimizer_state"] = True
+        d["trainer_config"] = TrainerConfig.from_dict(trainer_payload)
+        if (
+            isinstance(d["trainer_config"], SupervisedTrainerConfig)
+            and d["trainer_config"].load_reference_optimizer_state
+            and d["reference_checkpoint"] is None
+        ):
+            raise ValueError(
+                "supervised trainer config 'load_reference_optimizer_state' "
+                "requires 'reference_checkpoint'."
+            )
 
         slack_cfg = get_optional_mapping(d, "slack_config")
         if load_slack_config:
@@ -126,7 +145,7 @@ class TrainingConfig:
         yaml_save(self, directory, file_name)
 
     @classmethod
-    def load(cls, directory: str, file_name: str) -> TrainingConfig:
+    def load(cls, directory: str, file_name: str) -> RunConfig:
         return cls.from_dict(yaml_load(directory, file_name))
 
     @property
@@ -135,7 +154,7 @@ class TrainingConfig:
 
 
 @dataclass
-class TrainerConfig:
+class TrainerConfig(ABC):
     checkpoint_every_batch: int
     max_training_units: int
     batch_size: int
@@ -143,24 +162,79 @@ class TrainerConfig:
     seed: int
     use_bf16: bool
     model_save_pcts: List[float] = field(default_factory=list)
-    gradient_noise_update_batch_count: int = 4
-    gradient_noise_modulus: int = 1
+
+    @property
+    @abstractmethod
+    def kind(self) -> str: ...
 
     @classmethod
     def from_dict(cls, data: dict) -> "TrainerConfig":
         d = dict(data)
+        kind = get_str(d, "kind", "supervised").strip().lower()
+        d.pop("kind", None)
         if "max_epochs" in d:
             raise ValueError("trainer config no longer supports 'max_epochs'.")
         d["max_training_units"] = get_int(d, "max_training_units", 0)
         if d["max_training_units"] <= 0:
             raise ValueError("trainer config 'max_training_units' must be positive.")
-        d["gradient_noise_update_batch_count"] = get_int(d, "gradient_noise_update_batch_count", 0)
-        d["gradient_noise_modulus"] = max(1, get_int(d, "gradient_noise_modulus", 1))
         d["model_save_pcts"] = _load_model_save_pcts(get_optional_list(d, "model_save_pcts"))
-        return cls(**d)
+
+        if kind == "supervised":
+            return SupervisedTrainerConfig._from_dict(d)
+        if kind == "dpo":
+            return DpoTrainerConfig._from_dict(d)
+        raise ValueError(f"unsupported trainer config kind: {kind!r}")
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data["kind"] = self.kind
+        return data
+
+
+@dataclass
+class SupervisedTrainerConfig(TrainerConfig):
+    gradient_noise_update_batch_count: int = 4
+    gradient_noise_modulus: int = 1
+    load_reference_optimizer_state: bool = False
+
+    @property
+    def kind(self) -> str:
+        return "supervised"
+
+    @classmethod
+    def _from_dict(cls, data: dict) -> "SupervisedTrainerConfig":
+        d = dict(data)
+        d["gradient_noise_update_batch_count"] = get_int(d, "gradient_noise_update_batch_count", 0)
+        d["gradient_noise_modulus"] = max(1, get_int(d, "gradient_noise_modulus", 1))
+        d["load_reference_optimizer_state"] = get_bool(
+            d,
+            "load_reference_optimizer_state",
+            False,
+        )
+        return cls(**d)
+
+
+@dataclass
+class DpoTrainerConfig(TrainerConfig):
+    beta: float = 0.1
+    candidates_per_input: int = 2
+
+    @property
+    def kind(self) -> str:
+        return "dpo"
+
+    @classmethod
+    def _from_dict(cls, data: dict) -> "DpoTrainerConfig":
+        d = dict(data)
+        d["beta"] = get_float(d, "beta", 0.1)
+        if d["beta"] <= 0:
+            raise ValueError("DPO trainer config 'beta' must be positive.")
+        d["candidates_per_input"] = get_int(d, "candidates_per_input", 2)
+        if d["candidates_per_input"] < 2:
+            raise ValueError(
+                "DPO trainer config 'candidates_per_input' must be at least 2."
+            )
+        return cls(**d)
 
 
 @dataclass

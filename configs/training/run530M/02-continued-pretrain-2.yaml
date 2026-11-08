@@ -7,7 +7,6 @@ notes: Continued pretraining from qlike3-run.001-continued-pretrain
 configuration:
   reference_run_id: qlike3-run.001-continued-pretrain
   reference_checkpoint: last
-  load_reference_optimizer_state: true
 
   training_view_preset: mix40b-continued-pretrain2
 
@@ -66,6 +65,8 @@ configuration:
     cos_decay_start_ratio: 0.9
 
   trainer_config:
+    kind: supervised
+    load_reference_optimizer_state: true
     checkpoint_every_batch: 200
     max_training_units: 18_000_000_000
     batch_size: 12
