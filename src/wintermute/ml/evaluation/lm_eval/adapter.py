@@ -43,7 +43,8 @@ class WintermuteLmEvalAdapter(LM):
         self._completed_request_count = 0
 
     @property
-    def device(self) -> torch.device:
+    def device(self) -> torch.device:  # pyright: ignore[reportIncompatibleMethodOverride]
+        # lm-eval leaves LM.device untyped and Pyright infers None from its default.
         return self._device
 
     @property

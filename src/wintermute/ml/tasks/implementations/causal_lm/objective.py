@@ -60,11 +60,16 @@ class _CompletionPositionWeightedView(AbstractTrainingView):
         self.tokenizer = wrapped.tokenizer
 
     @property
-    def last_iteration_stats(self) -> TrainingViewIterationStats:
+    def last_iteration_stats(  # pyright: ignore[reportIncompatibleVariableOverride]
+        self,
+    ) -> TrainingViewIterationStats:
+        # This wrapper intentionally exposes the wrapped view's live state.
         return self.wrapped.last_iteration_stats
 
     @property
-    def completed_iteration_count(self) -> int:
+    def completed_iteration_count(  # pyright: ignore[reportIncompatibleVariableOverride]
+        self,
+    ) -> int:
         return self.wrapped.completed_iteration_count
 
     def __iter__(self) -> Iterator[TrainingExample]:

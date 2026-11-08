@@ -37,6 +37,10 @@ wintermute = "wintermute.cli.main:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
